@@ -114,6 +114,11 @@ export async function analyzeDiscoveredJob(jobId: string): Promise<{
           system: JOB_MATCH_SYSTEM_PROMPT,
           prompt: promptText,
           temperature: 0.3,
+          providerOptions: {
+            ollama: {
+              options: { num_ctx: APP_CONSTANTS.AI_OLLAMA_NUM_CTX },
+            },
+          },
         });
         span.setAttrs(
           genAiResponseAttrs({

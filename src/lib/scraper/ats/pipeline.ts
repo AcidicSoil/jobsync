@@ -1,13 +1,20 @@
 import { APP_CONSTANTS } from "@/lib/constants";
 import type { PrerankComponents } from "@/models/ai.schemas";
 import type { JobDetails } from "../types";
-import { scoreJob, passesFloor, locationMatches, buildIdf } from "./rank";
+import {
+  scoreJob,
+  passesFloor,
+  locationMatches,
+  buildIdf,
+  titleMatchesTarget,
+} from "./rank";
 
 export interface PipelineConfig {
   targetTitles: string[];
   keywords: string[];
   locations: string[];
   strictLocation: boolean;
+  strictTitles?: boolean;
 }
 
 export interface ScoredJob {
@@ -54,7 +61,13 @@ export function runAtsPipeline(
       )
     : null;
 
-  const working = located ?? fetchedJobs;
+  const locationFiltered = located ?? fetchedJobs;
+  const working =
+    config.strictTitles && config.targetTitles.length > 0
+      ? locationFiltered.filter((job) =>
+          titleMatchesTarget(job.title, config.targetTitles),
+        )
+      : locationFiltered;
 
   const scored: ScoredJob[] = working.map((job) => {
     const { score, components } = scoreJob(

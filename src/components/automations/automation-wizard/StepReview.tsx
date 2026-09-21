@@ -43,6 +43,12 @@ export function StepReview({
         </span>
       </div>
       <div className="flex justify-between gap-4">
+        <span className="text-muted-foreground">Target-title match</span>
+        <span className="font-medium text-right">
+          {atsConfig.strictTitles ? "Required" : "Ranking only"}
+        </span>
+      </div>
+      <div className="flex justify-between gap-4">
         <span className="text-muted-foreground">Locations</span>
         <span className="font-medium text-right">
           {atsConfig.locations?.length

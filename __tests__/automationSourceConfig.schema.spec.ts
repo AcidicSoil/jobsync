@@ -41,7 +41,7 @@ describe("CreateAutomationSchema conditional validation", () => {
     expect(result.success).toBe(true);
   });
 
-  it("greenhouse accepts topK within 1-50 and a saveUnanalyzed boolean", () => {
+  it("greenhouse accepts topK, saveUnanalyzed, and strictTitles", () => {
     const result = CreateAutomationSchema.safeParse({
       ...base,
       jobBoard: "greenhouse",
@@ -50,10 +50,14 @@ describe("CreateAutomationSchema conditional validation", () => {
           companies: [{ name: "Anthropic", token: "anthropic" }],
           topK: 25,
           saveUnanalyzed: false,
+          strictTitles: true,
         },
       },
     });
     expect(result.success).toBe(true);
+    if (result.success) {
+      expect(result.data.sourceConfig?.greenhouse?.strictTitles).toBe(true);
+    }
   });
 
   it("greenhouse rejects topK of 0", () => {

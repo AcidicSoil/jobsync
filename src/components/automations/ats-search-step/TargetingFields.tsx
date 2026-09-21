@@ -41,6 +41,17 @@ export function TargetingFields({ value, onChange }: TargetingFieldsProps) {
         }}
       />
 
+      <div className="flex items-center justify-between gap-4 rounded-lg border p-3">
+        <Label>Require a target-title match</Label>
+        <Switch
+          checked={!!value.strictTitles}
+          disabled={(value.targetTitles ?? []).length === 0}
+          onCheckedChange={(checked) =>
+            onChange({ ...value, strictTitles: checked })
+          }
+        />
+      </div>
+
       <EntityStringChipInput
         label="Keywords / skills"
         placeholder="e.g., React"

@@ -81,6 +81,11 @@ ${removeHtmlTags(job.description)}
           prompt: promptText,
           temperature: 0.3,
           abortSignal: signal,
+          providerOptions: {
+            ollama: {
+              options: { num_ctx: APP_CONSTANTS.AI_OLLAMA_NUM_CTX },
+            },
+          },
         });
         span.setAttrs(
           genAiResponseAttrs({

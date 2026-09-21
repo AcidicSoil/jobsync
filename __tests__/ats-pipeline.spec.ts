@@ -122,6 +122,47 @@ describe("runAtsPipeline", () => {
     expect(result.funnel.located).toBe(1); // only Canada; Berlin + Remote dropped
   });
 
+  it("strict title matching rejects generic IT management noise", () => {
+    const jobs = [
+      job({
+        title: "IT Support Specialist II",
+        location: "Houston, TX",
+        description: "Windows Intune endpoint troubleshooting",
+      }),
+      job({
+        title: "Manager, IT Operations",
+        location: "Houston, TX",
+        description: "Windows Intune endpoint troubleshooting networking",
+      }),
+      job({
+        title: "Data Center Deployment Technician II",
+        location: "Houston, TX",
+        description: "hardware deployment desktop support",
+      }),
+    ];
+    const result = runAtsPipeline(
+      jobs,
+      {
+        targetTitles: ["IT Support Specialist", "Data Center Technician"],
+        keywords: ["Windows", "Intune", "networking"],
+        locations: ["Houston"],
+        strictLocation: true,
+        strictTitles: true,
+      },
+      ["desktop support"],
+      { corpus: jobs, k: 10 },
+    );
+
+    const titles = result.toAnalyze.map((entry) => entry.job.title);
+    expect(titles).toHaveLength(2);
+    expect(titles).toEqual(
+      expect.arrayContaining([
+        "IT Support Specialist II",
+        "Data Center Deployment Technician II",
+      ]),
+    );
+  });
+
   it("sorts toAnalyze by score descending", () => {
     const jobs = [
       job({ title: "Frontend Engineer", description: "react" }),

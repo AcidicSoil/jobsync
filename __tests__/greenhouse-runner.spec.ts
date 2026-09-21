@@ -52,6 +52,7 @@ import { searchGreenhouseJobs } from "@/lib/scraper/greenhouse";
 import { generateText } from "ai";
 import type { Automation } from "@/models/automation.model";
 import { AiProvider } from "@/models/ai.model";
+import { APP_CONSTANTS } from "@/lib/constants";
 
 // Each call to generateText returns a promise you resolve/reject manually,
 // in whatever order the test wants — lets you simulate out-of-order
@@ -183,6 +184,21 @@ describe("runAutomation (greenhouse)", () => {
     expect(byKey.highlighted).toBe(2);
     // located stage omitted (strictLocation off).
     expect(funnelStats.some((s: any) => s.key === "located")).toBe(false);
+  });
+
+  it("passes the configured Ollama context to automation matching", async () => {
+    (searchGreenhouseJobs as any).mockResolvedValue({
+      jobs: [makeJob("Frontend Engineer", "React")],
+      errors: [],
+    });
+
+    await runAutomation(automation);
+
+    expect((generateText as any).mock.calls[0][0].providerOptions).toEqual({
+      ollama: {
+        options: { num_ctx: APP_CONSTANTS.AI_OLLAMA_NUM_CTX },
+      },
+    });
   });
 
   it("completes with zero saved when nothing clears the floor", async () => {

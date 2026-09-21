@@ -25,6 +25,20 @@ function tokenize(value: string): string[] {
     .filter((token) => token.length > 1 && !TITLE_STOP.has(token));
 }
 
+export function titleMatchesTarget(
+  jobTitle: string,
+  targetTitles: string[],
+): boolean {
+  const jobTokens = new Set(tokenize(jobTitle));
+  return targetTitles.some((targetTitle) => {
+    const targetTokens = tokenize(targetTitle);
+    if (targetTokens.length === 0) return false;
+    const requiredHits = Math.min(2, targetTokens.length);
+    const hitCount = targetTokens.filter((token) => jobTokens.has(token)).length;
+    return hitCount >= requiredHits;
+  });
+}
+
 // Whole-term match with word boundaries so "react" does not match "reactive".
 function termInText(text: string, term: string): boolean {
   const clean = term.trim().toLowerCase();
