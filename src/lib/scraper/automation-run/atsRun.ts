@@ -273,6 +273,7 @@ export async function runAtsRun(
       if (signal?.aborted) return;
 
       const saveUnanalyzed = async () => {
+        if (!config.saveUnanalyzed) return;
         try {
           const { saved, tagsApplied } = await persistDiscoveredJob(
             automation,
@@ -354,24 +355,44 @@ export async function runAtsRun(
         { score: matchResult.score, threshold: automation.matchThreshold },
       );
 
-      if (!isStrong) return;
+      const analyzedMatchData = {
+        ...matchResult.data,
+        resumeId: resume.id,
+        resumeTitle: resume.title,
+        matchedAt: new Date().toISOString(),
+        provider: aiSettings.provider,
+        model: modelName,
+        prerankScore: scored.score,
+        prerankComponents: scored.components,
+        analyzed: true,
+      };
+
+      if (!isStrong) {
+        try {
+          await persistDiscoveredJob(
+            automation,
+            scored.job,
+            matchResult.score,
+            analyzedMatchData,
+            skillTerms,
+            "dismissed",
+          );
+        } catch (err) {
+          log.error("[ATS] Failed to remember dismissed listing", {
+            "automation.id": automation.id,
+            provider: provider.label,
+            error: String(err),
+          });
+        }
+        return;
+      }
 
       try {
         const { saved, tagsApplied } = await persistDiscoveredJob(
           automation,
           scored.job,
           matchResult.score,
-          {
-            ...matchResult.data,
-            resumeId: resume.id,
-            resumeTitle: resume.title,
-            matchedAt: new Date().toISOString(),
-            provider: aiSettings.provider,
-            model: modelName,
-            prerankScore: scored.score,
-            prerankComponents: scored.components,
-            analyzed: true,
-          },
+          analyzedMatchData,
           skillTerms,
         );
         if (saved) {

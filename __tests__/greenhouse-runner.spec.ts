@@ -299,6 +299,50 @@ describe("runAutomation (greenhouse)", () => {
     expect((generateText as any).mock.calls.length).toBe(2);
   });
 
+  it("remembers below-threshold analyzed jobs as dismissed without counting them as saved", async () => {
+    const auto = automationWithGreenhouseConfig({
+      topK: 1,
+      saveUnanalyzed: false,
+    });
+    (searchGreenhouseJobs as any).mockResolvedValue({
+      jobs: [makeJob("Frontend Engineer", "React")],
+      errors: [],
+    });
+    (generateText as any).mockResolvedValueOnce({
+      text: scoreText(50),
+    });
+
+    const result = await runAutomation(auto);
+
+    expect(result.status).toBe("completed");
+    expect(result.jobsProcessed).toBe(1);
+    expect(result.jobsMatched).toBe(0);
+    expect(result.jobsSaved).toBe(0);
+    expect((prisma.job.create as any).mock.calls).toHaveLength(1);
+    expect((prisma.job.create as any).mock.calls[0][0].data.discoveryStatus).toBe(
+      "dismissed",
+    );
+  });
+
+  it("does not persist an AI-failed listing when saveUnanalyzed is false", async () => {
+    const auto = automationWithGreenhouseConfig({
+      topK: 1,
+      saveUnanalyzed: false,
+    });
+    (searchGreenhouseJobs as any).mockResolvedValue({
+      jobs: [makeJob("Frontend Engineer", "React")],
+      errors: [],
+    });
+    (generateText as any).mockResolvedValueOnce({ text: "not match data" });
+
+    const result = await runAutomation(auto);
+
+    expect(result.status).toBe("completed");
+    expect(result.jobsProcessed).toBe(0);
+    expect(result.jobsSaved).toBe(0);
+    expect((prisma.job.create as any).mock.calls).toHaveLength(0);
+  });
+
   it("custom topK controls how many jobs get LLM analysis vs saved unanalyzed", async () => {
     const auto = automationWithGreenhouseConfig({ topK: 3 });
     (searchGreenhouseJobs as any).mockResolvedValue({
@@ -436,7 +480,15 @@ describe("runAutomation (greenhouse)", () => {
       expect((generateText as any).mock.calls.length).toBe(5);
       expect(result.jobsProcessed).toBe(5); // analyzed
       expect(result.jobsMatched).toBe(3); // met threshold: 90, 85, 95
-      expect(result.jobsSaved).toBe(3); // 50 and 60 are analyzed but dropped
+      expect(result.jobsSaved).toBe(3);
+      // The two below-threshold jobs are persisted only as hidden dismissed
+      // records so the next automation run can dedupe them without resurfacing
+      // them as tracked jobs.
+      expect((prisma.job.create as any).mock.calls.length).toBe(5);
+      const statuses = (prisma.job.create as any).mock.calls.map(
+        (call: any[]) => call[0].data.discoveryStatus,
+      );
+      expect(statuses.filter((status: string) => status === "dismissed")).toHaveLength(2);
     });
   });
 });
