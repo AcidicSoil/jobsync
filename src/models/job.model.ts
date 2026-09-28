@@ -1,6 +1,10 @@
 import type { JobBoard, LeverHost } from "@/models/automation.model";
 import { CoverLetter, Resume } from "./profile.model";
 import type { JobContactLink } from "./contact.model";
+// Type-only: jobStage.model.ts imports Tag from here and has a runtime export,
+// so a value import back would make a real module cycle.
+import type { JobStage } from "./jobStage.model";
+import type { SortDir } from "./sort.model";
 
 export interface JobForm {
   id?: string;
@@ -57,6 +61,7 @@ export interface JobResponse {
   matchData?: string | null;
   tags?: Tag[];
   contactLinks?: JobContactLink[];
+  stages?: JobStage[];
   createdVia?: string | null;
   discoveryStatus?: string | null;
   descriptionCompleteness?: DescriptionCompleteness | null;
@@ -64,6 +69,19 @@ export interface JobResponse {
 }
 
 export type JobsViewMode = "table" | "cards";
+
+// First-click direction per sortable column. The keys are also the server's
+// sort whitelist in getJobsList.
+export const JOB_SORT_FIELDS = {
+  appliedDate: "desc",
+  title: "asc",
+  company: "asc",
+  location: "asc",
+  matchScore: "desc",
+  source: "asc",
+} as const satisfies Record<string, SortDir>;
+
+export type JobSortField = keyof typeof JOB_SORT_FIELDS;
 
 export interface JobTitle {
   id: string;

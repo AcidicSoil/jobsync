@@ -3,7 +3,7 @@ type: tutorial
 title: Getting Started
 description: The first run through JobSync — creating an account, connecting an AI provider, adding a job, and what each sidebar area is for.
 feature: setup
-tags: [setup, first run, sign in, account, ai provider, ollama, sidebar, navigation]
+tags: [setup, first run, sign in, account, ai provider, ollama, sidebar, navigation, dashboard, quick add, shortcuts]
 aliases: [new user, onboarding, first steps, how do I start, set up jobsync]
 status: stable
 stale_after: 2027-08-31
@@ -19,6 +19,8 @@ Open the app and choose **Create Account** on the sign-in page, or go straight t
 
 Open the avatar menu at the bottom of the left sidebar and choose **Settings**, then **AI Provider**. Pick a provider, then a model. JobSync supports Ollama, OpenAI, DeepSeek, Gemini and OpenRouter. Ollama runs models on your own machine and needs no key; the other four are hosted and need an API key, which you add under **Settings → API Keys** in that same menu. Keys are encrypted before they are stored.
 
+If you run Ollama somewhere other than the default address, add that address under **Settings → API Keys** as the Ollama Base URL. Leaving it unset is fine and is the normal case — JobSync then uses the server default shown on that card. If you have saved one and want to go back to the default, use **Reset to default** on the Ollama card. The connection check on that page only runs by itself when Ollama is your selected provider; the refresh button next to it checks on demand whatever you have selected.
+
 Nothing AI-powered works until a provider *and* a model are both set — resume review, job matching, cover letters and the chat panel all refuse to start rather than silently picking a model for you. If you selected Ollama and the model list is empty, JobSync could not reach the Ollama server; check that it is running and reachable from wherever JobSync is running.
 
 ## How do I add my first job?
@@ -27,10 +29,17 @@ Click **Jobs** in the sidebar, then the **Add Job** button in the top-right of t
 
 There is a faster route once an AI provider is set: click **Chat AI** in the header, paste the full text of a job posting into the chat, and the assistant extracts the details and shows you exactly what it found before anything is saved. Nothing is written until you approve it.
 
+## How do I add something quickly from the Dashboard?
+
+The card in the top-left of the Dashboard has six buttons — **Add Job**, **Add Automation**, **Add Task**, **Add Question**, **Add Activity** and **Add Contact** — each opening the same form you would reach by navigating to that area yourself.
+
+Five of them take you to the matching page with the form already open, so you land where the new record will appear. **Add Contact** is the exception: it opens the contact form over the Dashboard, and saving leaves you there rather than on **Library → Contacts**.
+
 ## What is each area of the sidebar for?
 
-- **Dashboard** — summary cards: application counts, recent jobs and activities, and weekly charts.
+- **Dashboard** — summary cards: application counts, recent jobs and activities, weekly charts, and a quick-add card for the six kinds of record you create most.
 - **Jobs** — every job you are tracking, plus jobs discovered by automations.
+- **Interviews** — every interview round across your jobs in one list, with filters and outcomes.
 - **Automations** — scheduled searches that pull new postings in and score them against your resume.
 - **Tasks** — to-dos with a due date, priority and percent complete, and a timed activity you can start from each one.
 - **Activities** — time you spend on your job hunt, timed with a start/stop timer or logged afterwards, optionally started from a task.

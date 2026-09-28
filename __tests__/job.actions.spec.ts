@@ -14,6 +14,7 @@ import {
 import { getMockJobDetails, getMockJobsList } from "@/lib/mock.utils";
 import { JobResponse } from "@/models/job.model";
 import { getCurrentUser } from "@/utils/user.utils";
+import { resolveStageTypeForStatusId } from "@/lib/jobs/resolve";
 import { PrismaClient } from "@prisma/client";
 const prisma = new PrismaClient();
 
@@ -22,6 +23,7 @@ vi.mock("@prisma/client", () => {
   const mPrismaClient = {
     jobStatus: {
       findMany: vi.fn(),
+      findUnique: vi.fn(),
       create: vi.fn(),
       update: vi.fn(),
     },
@@ -52,13 +54,31 @@ vi.mock("@prisma/client", () => {
     resume: { count: vi.fn() },
     coverLetter: { count: vi.fn() },
     tag: { count: vi.fn() },
+    jobStage: {
+      findFirst: vi.fn(),
+      count: vi.fn(),
+      create: vi.fn(),
+      update: vi.fn(),
+      updateMany: vi.fn(),
+    },
+    $transaction: vi.fn(),
   };
+  (mPrismaClient.$transaction as any).mockImplementation((fn: any) =>
+    fn(mPrismaClient),
+  );
   return {
     PrismaClient: vi.fn(function () {
       return mPrismaClient;
     }),
   };
 });
+
+// Only the stage-type resolver is stubbed: the other resolvers in that module
+// are used by addJob and the reference-create actions in this same spec.
+vi.mock("@/lib/jobs/resolve", async (importOriginal) => ({
+  ...((await importOriginal()) as object),
+  resolveStageTypeForStatusId: vi.fn(),
+}));
 
 vi.mock("@/utils/user.utils", () => ({
   getCurrentUser: vi.fn(),
@@ -103,6 +123,13 @@ describe("jobActions", () => {
     for (const model of refModels) {
       (prisma as any)[model].count.mockResolvedValue(1);
     }
+    // Both status write paths now append a stage before updating the job.
+    (prisma as any).$transaction.mockImplementation((fn: any) => fn(prisma));
+    (prisma as any).job.count.mockResolvedValue(1);
+    (prisma as any).jobStage.create.mockResolvedValue({ id: "stage-id" });
+    (prisma as any).jobStage.updateMany.mockResolvedValue({ count: 1 });
+    (resolveStageTypeForStatusId as any).mockResolvedValue("stage-type-id");
+    (prisma as any).jobStatus.findUnique.mockResolvedValue({ value: "draft" });
   });
   describe("getStatusList", () => {
     it("should return status list on successful query", async () => {
@@ -128,6 +155,23 @@ describe("jobActions", () => {
       );
 
       await expect(getStatusList()).resolves.toStrictEqual(mockErrorResponse);
+    });
+
+    it("returns statuses in JOB_STATUSES order, unknown values last", async () => {
+      (prisma.jobStatus.findMany as any).mockResolvedValue([
+        { id: "1", label: "Offer Accepted", value: "offer-accepted" },
+        { id: "2", label: "Legacy", value: "legacy" },
+        { id: "3", label: "Draft", value: "draft" },
+        { id: "4", label: "New", value: "new" },
+      ]);
+
+      const result = await getStatusList();
+      expect(result.map((s: any) => s.value)).toEqual([
+        "new",
+        "draft",
+        "offer-accepted",
+        "legacy",
+      ]);
     });
   });
   describe("getJobSourceList", () => {
@@ -224,6 +268,64 @@ describe("jobActions", () => {
       expect(result).toEqual({
         success: false,
         message: "Not authenticated",
+      });
+    });
+
+    describe("sorting", () => {
+      const BASE = [{ createdAt: "desc" }, { id: "desc" }];
+      const sortArgs = (sort: any) =>
+        [1, 10, undefined, undefined, undefined, undefined, undefined, undefined, undefined, sort] as const;
+
+      beforeEach(() => {
+        (getCurrentUser as any).mockResolvedValue(mockUser);
+        (prisma.job.findMany as any).mockResolvedValue([]);
+        (prisma.job.count as any).mockResolvedValue(0);
+      });
+
+      it("orders by newest added with an id tiebreaker by default", async () => {
+        await getJobsList();
+        expect(prisma.job.findMany).toHaveBeenCalledWith(
+          expect.objectContaining({ orderBy: BASE }),
+        );
+      });
+
+      it("sorts text columns on the canonical value", async () => {
+        await getJobsList(...sortArgs({ field: "company", dir: "asc" }));
+        expect(prisma.job.findMany).toHaveBeenCalledWith(
+          expect.objectContaining({
+            orderBy: [{ Company: { value: "asc" } }, ...BASE],
+          }),
+        );
+        expect(prisma.job.count).toHaveBeenCalledTimes(1);
+      });
+
+      it("ignores a field outside the whitelist", async () => {
+        await getJobsList(...sortArgs({ field: "userId", dir: "asc" }));
+        expect(prisma.job.findMany).toHaveBeenCalledWith(
+          expect.objectContaining({ orderBy: BASE }),
+        );
+      });
+
+      it("pages real match scores first, then unscored jobs by newest", async () => {
+        (prisma.job.count as any)
+          .mockResolvedValueOnce(1)
+          .mockResolvedValueOnce(1);
+        (prisma.job.findMany as any)
+          .mockResolvedValueOnce([{ id: "scored", matchScore: 80, matchData: "{}" }])
+          .mockResolvedValueOnce([{ id: "unmatched", matchScore: null, matchData: null }]);
+
+        const result = await getJobsList(...sortArgs({ field: "matchScore", dir: "desc" }));
+
+        expect(result.total).toBe(2);
+        expect(result.data.map((j: any) => j.id)).toEqual(["scored", "unmatched"]);
+        const [valuedCall, blankCall] = (prisma.job.findMany as any).mock.calls;
+        expect(valuedCall[0].orderBy).toEqual([{ matchScore: "desc" }, ...BASE]);
+        expect(blankCall[0].orderBy).toEqual(BASE);
+        // The dismissed-hiding AND survives, with the partition appended.
+        expect(valuedCall[0].where.AND).toHaveLength(2);
+        expect(valuedCall[0].where.AND[1]).toMatchObject({
+          matchScore: { not: null },
+        });
       });
     });
 
@@ -820,11 +922,47 @@ describe("jobActions", () => {
                 email: true,
                 phone: true,
                 linkedinUrl: true,
+                lastContactedAt: true,
                 Company: { select: { id: true, label: true } },
               },
             },
           },
           orderBy: { createdAt: "asc" },
+        },
+        stages: {
+          include: {
+            StageType: { include: { Status: true } },
+            interviewers: {
+              include: {
+                Contact: {
+                  select: {
+                    id: true,
+                    name: true,
+                    title: true,
+                    email: true,
+                    phone: true,
+                    linkedinUrl: true,
+                    lastContactedAt: true,
+                    Company: { select: { id: true, label: true } },
+                  },
+                },
+              },
+              orderBy: { createdAt: "asc" },
+            },
+            prepQuestions: {
+              include: {
+                Question: {
+                  select: {
+                    id: true,
+                    question: true,
+                    answer: true,
+                    tags: true,
+                  },
+                },
+              },
+              orderBy: { createdAt: "asc" },
+            },
+          },
         },
       },
     });
@@ -1008,6 +1146,13 @@ describe("jobActions", () => {
           jobUrl: jobData.jobUrl,
           applied: jobData.applied,
           resumeId: jobData.resume,
+          stages: {
+            create: {
+              stageTypeId: "stage-type-id",
+              occurredAt: expect.any(Date),
+              isCurrent: true,
+            },
+          },
         },
       });
     });
@@ -1035,11 +1180,39 @@ describe("jobActions", () => {
           description: jobData.jobDescription,
           jobType: jobData.type,
           userId: mockUser.id,
-          applied: jobData.applied,
           resumeId: jobData.resume,
+          stages: {
+            create: {
+              stageTypeId: "stage-type-id",
+              occurredAt: expect.any(Date),
+              isCurrent: true,
+            },
+          },
         },
       });
       expect(result).toEqual({ data: jobData, success: true });
+    });
+    it("marks the job applied when the chosen status is Applied", async () => {
+      (getCurrentUser as any).mockResolvedValue(mockUser);
+      (prisma as any).jobStatus.findUnique.mockResolvedValue({ value: "applied" });
+      (prisma.job.create as any).mockResolvedValue(jobData);
+
+      await addJob({ ...jobData, dateApplied: undefined });
+
+      const data = (prisma.job.create as any).mock.calls[0][0].data;
+      expect(data.applied).toBe(true);
+      expect(data.appliedDate).toEqual(expect.any(Date));
+    });
+    it("marks an Offer job applied without inventing a date", async () => {
+      (getCurrentUser as any).mockResolvedValue(mockUser);
+      (prisma as any).jobStatus.findUnique.mockResolvedValue({ value: "offer" });
+      (prisma.job.create as any).mockResolvedValue(jobData);
+
+      await addJob({ ...jobData, dateApplied: undefined });
+
+      const data = (prisma.job.create as any).mock.calls[0][0].data;
+      expect(data.applied).toBe(true);
+      expect(data.appliedDate).toBeUndefined();
     });
     it("should handle unexpected errors", async () => {
       (getCurrentUser as any).mockResolvedValue(mockUser);
@@ -1137,6 +1310,7 @@ describe("jobActions", () => {
       jobSourceId: "source-id",
       resumeId: null,
       coverLetterId: null,
+      statusId: "status-id",
       tags: [{ id: "tag-1" }],
     };
     beforeEach(() => {
@@ -1211,6 +1385,83 @@ describe("jobActions", () => {
 
       expect(result).toStrictEqual({ data: jobData, success: true });
       expect(prisma.job.update).toHaveBeenCalledTimes(1);
+    });
+    it("keeps an Interview job applied when it has no date", async () => {
+      (getCurrentUser as any).mockResolvedValue(mockUser);
+      (prisma as any).jobStatus.findUnique.mockResolvedValue({
+        value: "interview",
+      });
+      (prisma.job.update as any).mockResolvedValue(jobData);
+
+      await updateJob({ ...jobData, dateApplied: undefined });
+
+      const data = (prisma.job.update as any).mock.calls[0][0].data;
+      expect(data.applied).toBe(true);
+      expect(data.appliedDate).toBeNull();
+    });
+    it("un-applies a job whose date is cleared and was never applied to", async () => {
+      (getCurrentUser as any).mockResolvedValue(mockUser);
+      (prisma as any).jobStage.count.mockResolvedValue(0);
+      (prisma.job.update as any).mockResolvedValue(jobData);
+
+      await updateJob({ ...jobData, dateApplied: undefined });
+
+      expect((prisma as any).jobStage.count.mock.calls[0][0].where).toMatchObject(
+        { jobId: "job-id", Job: { userId: mockUser.id } },
+      );
+      const data = (prisma.job.update as any).mock.calls[0][0].data;
+      expect(data.applied).toBe(false);
+      expect(data.appliedDate).toBeNull();
+    });
+    it("keeps a job applied when an earlier stage was an applying one", async () => {
+      (getCurrentUser as any).mockResolvedValue(mockUser);
+      (prisma as any).jobStatus.findUnique.mockResolvedValue({
+        value: "rejected",
+      });
+      (prisma as any).jobStage.count.mockResolvedValue(1);
+      (prisma.job.update as any).mockResolvedValue(jobData);
+
+      await updateJob({ ...jobData, dateApplied: undefined });
+
+      expect((prisma.job.update as any).mock.calls[0][0].data.applied).toBe(true);
+    });
+    it("does not date an Applied job on a save that keeps its status", async () => {
+      (getCurrentUser as any).mockResolvedValue(mockUser);
+      (prisma as any).jobStatus.findUnique.mockResolvedValue({
+        value: "applied",
+      });
+      (prisma.job.update as any).mockResolvedValue(jobData);
+
+      await updateJob({ ...jobData, dateApplied: undefined });
+
+      const data = (prisma.job.update as any).mock.calls[0][0].data;
+      expect(data.applied).toBe(true);
+      expect(data.appliedDate).toBeNull();
+    });
+    it("dates a job when the save moves it to Applied without a date", async () => {
+      (getCurrentUser as any).mockResolvedValue(mockUser);
+      (prisma as any).jobStatus.findUnique.mockResolvedValue({
+        value: "applied",
+      });
+      (prisma.job.update as any).mockResolvedValue(jobData);
+
+      await updateJob({ ...jobData, status: "s-new", dateApplied: undefined });
+
+      const data = (prisma.job.update as any).mock.calls[0][0].data;
+      expect(data.applied).toBe(true);
+      expect(data.appliedDate).toEqual(expect.any(Date));
+    });
+    it("appends a status stage when the Edit Job dialog changes the status", async () => {
+      (getCurrentUser as any).mockResolvedValue(mockUser);
+      (prisma.job.update as any).mockResolvedValue(jobData);
+      (prisma as any).jobStage.findFirst.mockResolvedValue({
+        id: "st-old",
+        StageType: { statusId: "s-old", Status: { value: "applied" } },
+      });
+
+      await updateJob({ ...jobData, status: "s-new" });
+
+      expect((prisma as any).jobStage.create).toHaveBeenCalled();
     });
     it("should handle unexpected errors", async () => {
       (getCurrentUser as any).mockResolvedValue(mockUser);

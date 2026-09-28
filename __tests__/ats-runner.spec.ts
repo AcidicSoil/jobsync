@@ -17,7 +17,13 @@ vi.mock("@prisma/client", () => {
     location: { findUnique: vi.fn(), create: vi.fn() },
     company: { findUnique: vi.fn(), create: vi.fn() },
     jobSource: { findUnique: vi.fn(), create: vi.fn() },
-    jobStatus: { findFirst: vi.fn(), create: vi.fn() },
+    jobStatus: { findFirst: vi.fn(), findUnique: vi.fn(), create: vi.fn() },
+    jobStage: { create: vi.fn() },
+    jobStageType: {
+      findUnique: vi.fn(),
+      aggregate: vi.fn(),
+      create: vi.fn(),
+    },
   };
   return {
     PrismaClient: vi.fn(function () {
@@ -118,6 +124,17 @@ describe("runAutomation (lever)", () => {
     (prisma.company.findUnique as any).mockResolvedValue({ id: "co" });
     (prisma.jobSource.findUnique as any).mockResolvedValue({ id: "src" });
     (prisma.jobStatus.findFirst as any).mockResolvedValue({ id: "st" });
+    // Every saved job now gets its first current stage, which resolves the
+    // status-named stage type through the same Prisma mock.
+    (prisma.jobStatus.findUnique as any).mockResolvedValue({
+      id: "st",
+      label: "New",
+    });
+    (prisma.jobStageType.findUnique as any).mockResolvedValue({
+      id: "stage-type-new",
+      label: "New",
+    });
+    (prisma.jobStage.create as any).mockResolvedValue({ id: "stage-1" });
 
     (generateText as any).mockResolvedValue({
       text: "SCORES: match=90 recommendation=strong match\n\n## Summary\nGreat fit",
@@ -142,7 +159,7 @@ describe("runAutomation (lever)", () => {
     expect(result.jobsSaved).toBe(1);
   });
 
-  it("does not save an analyzed job scoring below the match threshold", async () => {
+  it("remembers a below-threshold analyzed job as dismissed without counting it as saved", async () => {
     (searchLeverJobs as any).mockResolvedValue({
       jobs: [makeJob("Frontend Engineer", "React")],
       errors: [],
@@ -157,7 +174,10 @@ describe("runAutomation (lever)", () => {
     expect(result.jobsProcessed).toBe(1); // analyzed
     expect(result.jobsMatched).toBe(0);
     expect(result.jobsSaved).toBe(0);
-    expect((prisma.job.create as any).mock.calls.length).toBe(0);
+    expect((prisma.job.create as any).mock.calls).toHaveLength(1);
+    expect((prisma.job.create as any).mock.calls[0][0].data.discoveryStatus).toBe(
+      "dismissed",
+    );
   });
 
   it("persists Lever's workplaceType through to the job record", async () => {

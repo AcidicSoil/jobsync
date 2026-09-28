@@ -13,8 +13,11 @@ import {
   resolveWorkplaceType,
   resolveJobStatus,
   resolveTags,
+  resolveStageTypeForStatusId,
   type ResolvedEntity,
 } from "./resolve";
+import { appendStatusStage } from "@/actions/job/shared";
+import { jobFieldsForStage } from "@/actions/jobStage/shared";
 
 // Same renderer config as createJobFromNames — html:false escapes raw HTML.
 const md = new MarkdownIt({ html: false, linkify: false, breaks: true });
@@ -63,7 +66,7 @@ export async function updateJobFromNames(
   // caller learns "not found" before any entity is created as a side effect.
   const existing = await prisma.job.findFirst({
     where: { id: jobId, userId, createdVia: { not: null } },
-    select: { id: true, descriptionCompleteness: true },
+    select: { id: true, descriptionCompleteness: true, appliedDate: true },
   });
   if (!existing) {
     return {
@@ -123,9 +126,29 @@ export async function updateJobFromNames(
   if (input.dueDate !== undefined) data.dueDate = input.dueDate;
   if (input.jobUrl !== undefined) data.jobUrl = normalizeJobUrl(input.jobUrl);
   if (input.applied !== undefined) data.applied = input.applied;
-  if (input.appliedDate !== undefined) data.appliedDate = input.appliedDate;
-  if (input.applied === true && input.appliedDate === undefined) {
+  if (input.appliedDate !== undefined) {
+    data.appliedDate = input.appliedDate;
+    data.applied = true;
+  }
+  // D5: an appliedDate already on the job is never overwritten, the same rule
+  // updateJobStatus and every stage write path now follow.
+  if (
+    input.applied === true &&
+    input.appliedDate === undefined &&
+    !existing.appliedDate
+  ) {
     data.appliedDate = new Date();
+  }
+  if (statusId && input.status !== undefined) {
+    Object.assign(
+      data,
+      jobFieldsForStage(
+        input.status.toLowerCase(),
+        statusId,
+        null,
+        (data.appliedDate as Date | undefined) ?? existing.appliedDate,
+      ),
+    );
   }
   if (resolvedTagsResult) {
     data.tags = { set: resolvedTagsResult.resolved.map((t) => ({ id: t.id })) };
@@ -151,10 +174,23 @@ export async function updateJobFromNames(
     };
   }
 
+  // D4: this resolve can create a row and writes through the base client, so
+  // it must not run while the transaction below holds SQLite's write lock.
+  const stageTypeId = statusId
+    ? await resolveStageTypeForStatusId(statusId, userId)
+    : null;
+
   try {
-    await prisma.job.update({
-      where: { id: jobId, userId, createdVia: { not: null } },
-      data,
+    await prisma.$transaction(async (tx: any) => {
+      // D9: the sixth write path to Job.statusId. Without this an agent can
+      // move a job's status while its timeline stays where it was.
+      if (statusId && stageTypeId) {
+        await appendStatusStage(tx, jobId, statusId, stageTypeId, userId);
+      }
+      await tx.job.update({
+        where: { id: jobId, userId, createdVia: { not: null } },
+        data,
+      });
     });
   } catch (error: any) {
     if (error?.code === "P2025") {

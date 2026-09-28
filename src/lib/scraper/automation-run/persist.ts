@@ -7,6 +7,7 @@ import type {
 } from "@/models/automation.model";
 import type { JobDetails } from "../types";
 import { mapScrapedJobToJobRecord } from "../mapper";
+import { firstStageCreate } from "@/lib/jobs/createJobRecord";
 import { normalizeJobUrl } from "../utils";
 import type { SkillTerm } from "./skillTags";
 
@@ -57,8 +58,14 @@ export async function persistDiscoveredJob(
     discoveryStatus,
   });
 
+  const stages = await firstStageCreate(
+    jobRecord.statusId,
+    automation.userId,
+    jobRecord.createdAt,
+  );
+
   try {
-    await db.job.create({ data: jobRecord });
+    await db.job.create({ data: { ...jobRecord, stages } });
     return { saved: true, tagsApplied: jobRecord.tags?.connect.length ?? 0 };
   } catch (err: any) {
     if (err?.code === "P2002") return { saved: false, tagsApplied: 0 };

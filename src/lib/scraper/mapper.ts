@@ -1,5 +1,7 @@
 import type { ScrapedJobData, DiscoveryStatus } from "@/models/automation.model";
+import { addDays } from "date-fns";
 import db from "@/lib/db";
+import { APP_CONSTANTS } from "@/lib/constants";
 import { capitalize } from "@/lib/utils";
 import {
   resolveCompany,
@@ -56,6 +58,7 @@ interface MapperOutput {
   companyId: string;
   jobSourceId: string;
   locationId: string | null;
+  dueDate: Date;
   matchScore: number;
   matchData: string;
   discoveryStatus: DiscoveryStatus;
@@ -114,6 +117,7 @@ export async function mapScrapedJobToJobRecord(
     companyId: company.id,
     jobSourceId: source.id,
     locationId: location?.id ?? null,
+    dueDate: addDays(new Date(), APP_CONSTANTS.DEFAULT_JOB_DUE_DAYS),
     matchScore,
     matchData,
     discoveryStatus,
