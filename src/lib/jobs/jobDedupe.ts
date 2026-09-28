@@ -1,5 +1,10 @@
 import prisma from "@/lib/db";
-import { jobDedupeKey, normalizeJobUrl } from "@/lib/scraper/utils";
+import { APP_CONSTANTS } from "@/lib/constants";
+import {
+  jobDedupeKey,
+  jobIdentityKey,
+  normalizeJobUrl,
+} from "@/lib/scraper/utils";
 
 export interface ExistingJobRef {
   id: string;
@@ -19,6 +24,7 @@ export async function getExistingJobDedupeMap(
     select: {
       id: true,
       jobUrl: true,
+      createdAt: true,
       JobTitle: { select: { label: true } },
       Company: { select: { label: true } },
       Location: { select: { label: true } },
@@ -26,19 +32,32 @@ export async function getExistingJobDedupeMap(
   });
 
   const map = new Map<string, ExistingJobRef>();
+  const duplicateCutoff = new Date(
+    Date.now() -
+      APP_CONSTANTS.MCP_DUPLICATE_WINDOW_DAYS * 24 * 60 * 60 * 1000,
+  );
+
   for (const job of jobs) {
-    const key = jobDedupeKey({
+    const candidate = {
       url: job.jobUrl,
       title: job.JobTitle?.label,
       company: job.Company?.label,
       location: job.Location?.label ?? undefined,
-    });
-    if (!map.has(key)) {
-      map.set(key, {
-        id: job.id,
-        title: job.JobTitle?.label ?? "",
-        company: job.Company?.label ?? "",
-      });
+    };
+    const ref = {
+      id: job.id,
+      title: job.JobTitle?.label ?? "",
+      company: job.Company?.label ?? "",
+    };
+
+    const key = jobDedupeKey(candidate);
+    if (!map.has(key)) map.set(key, ref);
+
+    if (job.createdAt >= duplicateCutoff) {
+      const identityKey = jobIdentityKey(candidate);
+      if (identityKey !== null && !map.has(identityKey)) {
+        map.set(identityKey, ref);
+      }
     }
   }
   return map;

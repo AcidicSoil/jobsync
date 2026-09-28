@@ -94,6 +94,18 @@ export function jobDedupeKey(job: DedupableJob): string {
   return `meta:${meta}`;
 }
 
+// Secondary identity used only against recent saved jobs. This mirrors add_job's
+// company + title duplicate tier without collapsing two distinct URL-bearing
+// postings that share a title inside one fetched ATS batch.
+export function jobIdentityKey(job: DedupableJob): string | null {
+  const title = canonicalizeEntityValue(job.title ?? "");
+  const company = canonicalizeEntityValue(job.company ?? "", {
+    stripLegalSuffix: true,
+  });
+  if (!title || !company) return null;
+  return `identity:${company}|${title}`;
+}
+
 // Removes jobs already saved (existingKeys) and collapses duplicates within the
 // batch itself. Every ATS source path runs through here.
 // Accepts any key lookup with `.has` so callers can pass a Set or the
@@ -106,7 +118,14 @@ export function dedupeJobs<T extends DedupableJob>(
   const result: T[] = [];
   for (const job of jobs) {
     const key = jobDedupeKey(job);
-    if (existingKeys.has(key) || seen.has(key)) continue;
+    const identityKey = jobIdentityKey(job);
+    if (
+      existingKeys.has(key) ||
+      (identityKey !== null && existingKeys.has(identityKey)) ||
+      seen.has(key)
+    ) {
+      continue;
+    }
     seen.add(key);
     result.push(job);
   }

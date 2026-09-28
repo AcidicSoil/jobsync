@@ -1,5 +1,5 @@
 import { getExistingJobDedupeMap, findExistingJobByUrl } from "@/lib/jobs/jobDedupe";
-import { jobDedupeKey } from "@/lib/scraper/utils";
+import { jobDedupeKey, jobIdentityKey } from "@/lib/scraper/utils";
 import { PrismaClient } from "@prisma/client";
 
 const prisma = new PrismaClient();
@@ -16,6 +16,7 @@ function row(over: Partial<{
   title: string | null;
   company: string | null;
   location: string | null;
+  createdAt: Date;
 }> = {}) {
   return {
     id: over.id ?? "job-1",
@@ -23,6 +24,7 @@ function row(over: Partial<{
     JobTitle: over.title === null ? null : { label: over.title ?? "Frontend Engineer" },
     Company: over.company === null ? null : { label: over.company ?? "Acme" },
     Location: over.location === null ? null : { label: over.location ?? "Remote" },
+    createdAt: over.createdAt ?? new Date(),
   };
 }
 
@@ -64,14 +66,54 @@ describe("getExistingJobDedupeMap", () => {
     expect(hit).toEqual({ id: "j1", title: "Engineer", company: "Acme" });
   });
 
-  it("keeps the first job when two rows collapse to the same key", async () => {
+  it("keeps the first job for both dedupe aliases when two rows collapse", async () => {
     mockJobs([
       row({ id: "first", jobUrl: "https://ex.com/jobs/1" }),
       row({ id: "second", jobUrl: "https://www.ex.com/jobs/1/?utm_source=x" }),
     ]);
     const map = await getExistingJobDedupeMap("user-1");
-    expect(map.size).toBe(1);
+    expect(map.size).toBe(2);
     expect(map.get(jobDedupeKey({ url: "https://ex.com/jobs/1" }))?.id).toBe("first");
+    expect(jobIdentityKey({ title: "Frontend Engineer", company: "Acme" })).not.toBeNull();
+    expect(map.get(jobIdentityKey({ title: "Frontend Engineer", company: "Acme" })!)?.id).toBe("first");
+  });
+
+  it("indexes a recent URL-bearing job by company+title identity for cross-source dedupe", async () => {
+    const existing = row({
+      id: "recent",
+      jobUrl: "https://aggregator.example/jobs/1",
+      title: "On-Site IT Support Analyst",
+      company: "Wilson Elser",
+      location: "Houston, TX",
+      createdAt: new Date(),
+    });
+    mockJobs([existing]);
+
+    const map = await getExistingJobDedupeMap("user-1");
+    const identity = jobIdentityKey({
+      title: "On-Site IT Support Analyst",
+      company: "Wilson Elser",
+    });
+
+    expect(identity).not.toBeNull();
+    expect(identity ? map.get(identity)?.id : undefined).toBe("recent");
+  });
+
+  it("does not identity-index an old URL-bearing job outside the duplicate window", async () => {
+    const existing = row({
+      id: "old",
+      jobUrl: "https://aggregator.example/jobs/1",
+      title: "Support Engineer",
+      company: "Acme",
+      createdAt: new Date(Date.now() - 31 * 24 * 60 * 60 * 1000),
+    });
+    mockJobs([existing]);
+
+    const map = await getExistingJobDedupeMap("user-1");
+    const identity = jobIdentityKey({ title: "Support Engineer", company: "Acme" });
+
+    expect(identity).not.toBeNull();
+    expect(identity ? map.has(identity) : false).toBe(false);
   });
 
   it("does not crash on null title/company/location", async () => {

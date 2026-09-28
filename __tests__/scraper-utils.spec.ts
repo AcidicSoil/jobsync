@@ -1,6 +1,7 @@
 import {
   normalizeJobUrl,
   jobDedupeKey,
+  jobIdentityKey,
   dedupeJobs,
 } from "@/lib/scraper/utils";
 
@@ -155,6 +156,26 @@ describe("dedupeJobs", () => {
       { title: "A", company: "X", location: "R", url: "" },
       { title: "A", company: "X", location: "R", url: "" },
       { title: "B", company: "X", location: "R", url: "" },
+    ];
+    expect(dedupeJobs(jobs, new Set())).toHaveLength(2);
+  });
+
+  it("removes a cross-source repost when a recent saved identity exists", () => {
+    const job = {
+      title: "On-Site IT Support Analyst",
+      company: "Wilson Elser",
+      location: "Houston, Texas",
+      url: "https://job-boards.greenhouse.io/wilsonelser/jobs/123",
+    };
+    const identity = jobIdentityKey(job);
+    expect(identity).not.toBeNull();
+    expect(dedupeJobs([job], new Set(identity ? [identity] : []))).toHaveLength(0);
+  });
+
+  it("keeps same-title jobs within one fetched batch when their URLs differ", () => {
+    const jobs = [
+      { title: "Support Engineer", company: "Acme", location: "Houston", url: "https://ex.com/1" },
+      { title: "Support Engineer", company: "Acme", location: "Houston", url: "https://ex.com/2" },
     ];
     expect(dedupeJobs(jobs, new Set())).toHaveLength(2);
   });
